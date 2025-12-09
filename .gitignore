@@ -1,0 +1,8 @@
+# ignore files
+.Rhistory
+.Rprofile
+.RData
+
+# ignore folders
+renv/library/
+
