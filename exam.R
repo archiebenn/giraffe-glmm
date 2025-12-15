@@ -5,8 +5,6 @@
 rm(list=ls())
 
 # load libraries
-library(vroom)
-library(here)
 library(tidyverse)
 library(performance)
 library(Hmisc)
@@ -117,19 +115,25 @@ mass_parks
 # mean mass across different landscape, vegetation, and lion presence
 mass_lvl <- df_clean %>%
   group_by(landscape, lion_presence, vegetation, observer) %>%
-  summarise(mean_mass = mean(body_mass))
+  summarise(mean_mass = mean(body_mass)) %>%
+  arrange(desc(mean_mass))
 mass_lvl
 
-# ggplot violin for mass across parks
+# violin for mass across parks
 plot_mass_parks <- df_clean %>%
+  
   ggplot(mapping = aes(x = park, y = body_mass)) +
+  
   geom_violin(aes(fill = park)) + 
+  
+  # aesthetics
   geom_boxplot(width = 0.1, col = "black")+
   ggtitle("Violin plot of giraffe mass across the parks using cleaned data") +
-  theme(plot.title = element_text(hjust = 0.8)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45)) +
   ylab("Body mass (kg)") + 
-  xlab("Park") +
-  theme_lucid()
+  xlab("Park") 
+
 plot_mass_parks
 
 #  3.2 SCATTER PLOTS
@@ -169,14 +173,28 @@ plot_predator
 
 # qq plot for all mass
 qqplot_mass <- df_clean %>%
-  ggqqplot(x = "body_mass", col = "seagreen")
+  ggqqplot(x = "body_mass")
 qqplot_mass
+
+
+qqplot_mass <- df_clean %>%
+  x = log(body_mass)
+
+# want to try cox-bos to estimate best trsnaformation off linear model to approximte normal:
+lm_body_mass  <- lm(body_mass ~ 1, df_clean)
+
+# calculate log likelihood from -2 to 2
+boxcox(lm_body_mass, lambda = seq(-2, 2, 0.1))
+### best appears to be ~0.25 which is between sqrt(0.5) and cube(0.33)
+
 
 
 # 3.3 FAMILY CHECKING
 # testing some families against the continuous response variable for error structure
 plot(fitdist(df_clean$body_mass, "norm"))
 plot(fitdist(df_clean$body_mass, "gamma"))
+plot(fitdist(df_clean$log_body_mass, "norm"))
+plot(fitdist(df_clean$cube_body_mass, "norm"))
 ### definitely appears to fit gamma slightly better
 
 
@@ -199,14 +217,16 @@ plot(fitdist(df_clean$body_mass, "gamma"))
 
 
 # GAUSSIAN GLMM
+# glmm using glmmTMB
 glmm_gauss <- glmmTMB(
   
+  # fixed effects
   body_mass ~ landscape +
     vegetation +
     lion_presence +
-    distance_to_water_km +
-    average_annual_rainfall_mm +
-    predator_density_per_sq_km + 
+    scaled_water_distance +
+    scaled_rainfall +
+    scaled_predators + 
     
     # park as random effect - each gets own intercept
     (1 | park) +
@@ -214,6 +234,8 @@ glmm_gauss <- glmmTMB(
     (1 | observer),
   
   data = df_clean,
+  
+  # using gaussian family
   family = gaussian()
 )
 
@@ -291,37 +313,67 @@ check_overdispersion(glmm_gauss)
 
 # check model
 check_model(glmm_gamma)
-#check_model(glmm_gauss)
+# check_model(glmm_gauss)
 
 
 
-# 3.4.8 fitted vs observed
+# 3.4.8 GAMMA fitted vs observed
+fit_model_gamma <- data.frame(
+  "Predicted" = predict(glmm_gamma, type = "response"),
+  "Observed" = df_clean$body_mass
+)
 
-fit_model_data <- data.frame(
+# plot predicted vs observed with 1:1 line
+ggplot(fit_model_gamma) +
+  # each point (x) = observed, (y) = model prediction
+  geom_point(aes(x = Observed, y = Predicted)) +
+  # add linear regression of observed:fitted
+  geom_smooth(
+    aes(x = Observed, y = Predicted, colour = "gamma"),
+    method = lm,
+    se = FALSE) +
+  # add 1:1 linear regression to plot to check main regression
+  geom_smooth(aes(x = Observed, y = Observed, colour = "observed"), method = "lm", se = FALSE, linetype = "dashed") +
+  
+  scale_colour_manual(name = NULL,
+                      breaks = c("observed", "gamma"),
+                      labels = c("Observed", "Gamma Model"),
+                      values = c("black", "#1ABC9C")) +
+  
+  xlab("Body mass (observed)") +
+  ylab("Body mass (predicted)") +
+  
+  ggtitle("Predicted vs. Observed for Gamma Model against df_clean") +
+  theme_lucid()
+
+# 3.4.8 GAUSS fitted vs observed
+fit_model_gauss <- data.frame(
   "Predicted" = predict(glmm_gauss, type = "response"),
   "Observed" = df_clean$body_mass
 )
 
-
-
 # plot predicted vs observed with 1:1 line
-ggplot(fit_model_data,
-  aes(x = Observed, y = Predicted)) +
-    
-    # each point (x) = observed, (y) = model prediction
-    geom_point() +
-    
-    # add linear regression of observed:fitted
-    geom_smooth(method = lm,
-                col = "red",
-                se = FALSE) +
-    
-    # add 1:1 linear regression to plot to check main regression
-    geom_abline(intercept = 0) +
+ggplot(fit_model_gauss) +
+  # each point (x) = observed, (y) = model prediction
+  geom_point(aes(x = Observed, y = Predicted)) +
+  # add linear regression of observed:fitted
+  geom_smooth(
+    aes(x = Observed, y = Predicted, colour = "gauss"),
+    method = lm,
+    se = FALSE) +
+  # add 1:1 linear regression to plot to check main regression
+  geom_smooth(aes(x = Observed, y = Observed, colour = "observed"), method = "lm", se = FALSE, linetype = "dashed") +
   
-    ggtitle("Predicted vs. Observed for glmm_gamma vs. df_clean. Red is artificial 1:1 regression") +
-    
-    theme_lucid()
+  scale_colour_manual(name = NULL,
+                      breaks = c("observed", "gauss"),
+                      labels = c("Observed", "Gauss Model"),
+                      values = c("black", "#154360")) +
+  
+  xlab("Body mass (observed)") +
+  ylab("Body mass (predicted)") +
+  
+  ggtitle("Predicted vs. Observed for Gauss Model against df_clean") +
+  theme_lucid()
   
 ### clearly not a 1:1 regression, but not too poor at the moment
 
@@ -339,37 +391,16 @@ models_predictions <- tibble(
 )
 
 
-# plot observed vs. fitted (predicted) for each model
-models_predictions %>%
-  
-  ggplot() +
-  
-  # add points from each model
-  geom_point(aes(x = observed, y = predicted_gamma), color = "red") +
-  geom_point(aes(x = observed, y = predicted_gauss), color = "grey") +
-  
-  
-  # 1:1 observed body mass from df_clean
-  geom_line(aes(x = observed, y = observed), linetype = "dashed") +
-  
-  
-  ylab("Body mass (predicted)") +
-  
-  theme_minimal()
-
-
-
-
-
 
 
 
 
 
 # GAUSSIAN GLMM 2
+# using log of body mass
 glmm_gauss2 <- glmmTMB(
   
-  log(body_mass) ~ landscape +
+    log(body_mass) ~ landscape +
     vegetation +
     lion_presence +
     distance_to_water_km +
@@ -425,27 +456,34 @@ check_model(glmm_gauss2)
 
 
 # 3.4.8 fitted vs observed
-
-fit_model_data <- data.frame(
+fit_model_gauss2 <- data.frame(
   "Predicted" = exp(predict(glmm_gauss2, type = "response")),
   "Observed" = df_clean$body_mass
 )
 
-
-
 # plot predicted vs observed with 1:1 line
-ggplot(fit_model_data,
-       aes(x = Observed, y = Predicted)) +
+ggplot(fit_model_gauss2) +
   # each point (x) = observed, (y) = model prediction
-  geom_point() +
+  geom_point(aes(x = Observed, y = Predicted)) +
   # add linear regression of observed:fitted
-  geom_smooth(method = lm,
-              col = "red",
-              se = FALSE) +
+  geom_smooth(
+    aes(x = Observed, y = Predicted, colour = "gauss2"),
+    method = lm,
+    se = FALSE) +
   # add 1:1 linear regression to plot to check main regression
-  geom_abline(intercept = 0) +
-  ggtitle("Predicted vs. Observed for glmm_gauss2 vs. df_clean. Red is artificial 1:1 regression") +
+  geom_smooth(aes(x = Observed, y = Observed, colour = "observed"), method = "lm", se = FALSE, linetype = "dashed") +
+  
+  scale_colour_manual(name = NULL,
+                      breaks = c("observed", "gauss2"),
+                      labels = c("Observed", "Gauss2 Model"),
+                      values = c("black", "#FF5733")) +
+  
+  xlab("Body mass (observed)") +
+  ylab("Body mass (predicted)") +
+  
+  ggtitle("Predicted vs. Observed for Gauss2 Model against df_clean") +
   theme_lucid()
+
 
 
 # 3.4.9 model predictions with modelbased - compare models visually
@@ -454,25 +492,6 @@ ggplot(fit_model_data,
 pred_gauss2_log <- estimate_expectation(glmm_gauss2)
 pred_gauss2 <- exp(pred_gauss2_log$Predicted)
 
-
-# and for predicted from gauss
-models_predictions$predicted_gauss2 <- pred_gauss2
-
-
-models_predictions %>%
-  
-  # plot observed vs. fitted (predicted)
-  ggplot() +
-  # add points from each model including gauss2 model
-  geom_point(aes(x = observed, y = predicted_gamma), color = "red") +
-  geom_point(aes(x = observed, y = predicted_gauss), color = "grey") +
-  geom_point(aes(x = observed, y = predicted_gauss2), color = "blue") +
-  # 1:1 observed body mass from df_clean
-  geom_line(aes(x = observed, y = observed), linetype = "dashed") +
- 
-  ylab("Body mass (predicted)") +
-  
-  theme_minimal()
 
 
 
@@ -507,26 +526,76 @@ BIC(glmm_gamma, glmm_gauss2, glmm_gauss3)
 # better scores and lower df <- lion presence and predator density wasn't adding anything meaningful to the model
 
 
-fit_model_data <- data.frame(
+
+fit_model_gauss3 <- data.frame(
   "Predicted" = exp(predict(glmm_gauss3, type = "response")),
   "Observed" = df_clean$body_mass
 )
 
-
-
 # plot predicted vs observed with 1:1 line
-ggplot(fit_model_data,
-       aes(x = Observed, y = Predicted)) +
+ggplot(fit_model_gauss3) +
   # each point (x) = observed, (y) = model prediction
-  geom_point() +
+  geom_point(aes(x = Observed, y = Predicted)) +
   # add linear regression of observed:fitted
-  geom_smooth(method = lm,
-              col = "red",
-              se = FALSE) +
+  geom_smooth(
+    aes(x = Observed, y = Predicted, colour = "gauss3"),
+    method = lm,
+    se = FALSE) +
   # add 1:1 linear regression to plot to check main regression
-  geom_abline(intercept = 0) +
-  ggtitle("Predicted vs. Observed for glmm_gauss2 vs. df_clean. Red is artificial 1:1 regression") +
+  geom_smooth(aes(x = Observed, y = Observed, colour = "observed"), method = "lm", se = FALSE, linetype = "dashed") +
+  
+  scale_colour_manual(name = NULL,
+                      breaks = c("observed", "gauss3"),
+                      labels = c("Observed", "Gauss3 Model"),
+                      values = c("black", "#FFC300")) +
+  
+  xlab("Body mass (observed)") +
+  ylab("Body mass (predicted)") +
+  
+  ggtitle("Predicted vs. Observed for Gauss3 Model against df_clean") +
   theme_lucid()
+
+
+
+#  model predictions with modelbased - compare models visually
+
+# add gauss2 model to df
+pred_gauss2_log <- estimate_expectation(glmm_gauss2)
+pred_gauss2 <- exp(pred_gauss2_log$Predicted)
+# and for predicted from gauss2
+models_predictions$predicted_gauss2 <- pred_gauss2
+
+
+# also create one for gauss3 model
+pred_gauss3_log <- estimate_expectation(glmm_gauss3)
+pred_gauss3 <- exp(pred_gauss3_log$Predicted)
+# and for predicted from gauss3
+models_predictions$predicted_gauss3 <- pred_gauss3
+
+models_predictions %>%
+  # plot observed vs. fitted (predicted)
+  ggplot() +
+  # add points from each model including gauss2 model
+  geom_smooth(aes(x = observed, y = predicted_gamma, colour = "gamma"), method = "lm", se = FALSE) +
+  geom_smooth(aes(x = observed, y = predicted_gauss, colour = "gauss"), method = "lm", se = FALSE) +
+  geom_smooth(aes(x = observed, y = predicted_gauss2, colour = "gauss2"), method = "lm", se = FALSE) +
+  geom_smooth(aes(x = observed, y = predicted_gauss3, colour = "gauss3") , method = "lm", se = FALSE) +
+  
+  # 1:1 observed body mass from df_clean
+  geom_line(aes(x = observed, y = observed), linetype = "dashed") +
+  
+  # adding a legend 
+  scale_colour_manual(name = NULL,
+                     breaks = c("gamma", "gauss", "gauss2", "gauss3"),
+                     labels = c("Gamma Model", "Gauss Model", "Gauss2 Model", "Gauss3 Model"),
+                     values = c("#1ABC9C", "#154360", "#FF5733", "#FFC300")) +
+  
+  ggtitle("Observed vs Predicted body mass for each model") +
+  ylab("Body mass (predicted)") +
+  xlab("Body mass (observed)") +
+  theme_lucid()
+
+
 
 
 # next step: look at marginal effects
