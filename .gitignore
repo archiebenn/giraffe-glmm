@@ -10,3 +10,5 @@ renv/library/
 # HTMLs
 *.html
 
+# any extra files
+*.log
