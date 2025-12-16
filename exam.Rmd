@@ -1,0 +1,872 @@
+---
+title: "BIOLM0039 - Programming in R coursework"
+author: "Archie Benn (1935263)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Set workspace
+
+```{r, echo = TRUE, message=FALSE, error=FALSE}
+# reset environment
+rm(list=ls())
+
+# load libraries
+library(tidyverse)
+library(performance)
+library(Hmisc)
+library(ggpubr)
+library(rstatix)
+library(fitdistrplus)
+library(MASS)
+library(see)
+library(TMB)
+library(glmmTMB)
+library(DHARMa)
+library(data.table)
+library(caret)
+library(modelbased)
+```
+
+## 2. Import and check Data
+Load in the data (tsv file saved from GitHub) as a tibble:
+
+```{r}
+df <- read_tsv("mass_sj19031.tsv")
+
+# check class (= data.frame/tibble)
+class(df)
+```
+
+Describe the data to get an overview of variables, values, and any missing data or typos:
+
+```{r}
+describe(df)
+```
+
+With this I can see the following:  
+- Data collected on giraffe mass from 5 observers across 4 parks  
+- BOOL type categorical data for `lion_presence`, `vegetation`, and `landscape`    
+- Continuous data on average annual rainfall, distance to water, and predator density  
+- Missing values in `landscape`, `vegetation`, `lion_presence`, `env_value`  
+- 5 distinct values for the BOOL variable `lion_presence` -> Typos in 'Absent' or 'Present' 
+
+## 2. Tidying data
+### 2.1 Outliers
+To check outliers and see a general distribution of body mass over the full dataset `df`, histograms and boxplots will be created:
+
+```{r}
+# histogram of entire data mass to view distribution
+mass_hist <- df %>%
+  
+  ggplot(aes(x = body_mass)) +
+  
+  # add histogram with bin width at 250kg
+  geom_histogram(fill = "#9EB9F3", color = "black", binwidth = 250) +
+  
+  # aesthetics
+  theme_minimal() +
+  labs(title = "Histogram of giraffe body mass across original dataset") +
+  xlab("Body mass (kg)") +
+  ylab("Count")
+
+mass_hist
+```
+```{r}
+# boxplot of entire dataset mass to check potential outliers
+mass_box <- df %>%
+  
+  ggplot(aes(x = "", y = body_mass)) +
+  
+  # reduce width to 0.25
+  geom_boxplot(width = 0.25, fill = "coral1") +
+  
+  # aesthetics
+  theme_lucid() +
+  labs(title = "Box plot of giraffe mass across original dataset") +
+  
+  # centre title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("") +
+  ylab("Body mass (kg)")
+
+mass_box
+```
+
+This box plot identifies 5 potential mass outliers in `df` as shown by the points outside the box plot using the IQR criterion.    
+
+From this information an outlier data frame will be created using `identify_outliers()` from `rstatix` which includes all rows related to these outliers in body mass, and includes outliers and extreme values.   
+
+This data frame will be used to remove these data during cleaning, and is justified biologically as giraffes rarely exceed 2000kg and outliers will be identified statistically:
+
+```{r}
+# create outlier data frame
+outlier_df <- identify_outliers(data = df,
+                  variable = "body_mass")
+
+head(outlier_df)
+```
+
+The dataset `df` is also in long format, and to have each row as an individual observation the data will be transformed to wide format, and cleaned again to drop any other N/A values which arise from the transformation to wide data below.
+
+### 2.2 Create cleaned data frame
+A clean data frame will be created based on the information above:
+
+```{r, message=FALSE, error=FALSE}
+# using tidyverse
+df_clean <- df %>%
+  
+  # remove outliers using anti_join() and the outlier data frame:
+  anti_join(outlier_df)  %>%
+  
+  # transform from long to wide format:
+  pivot_wider(names_from = env_var, values_from = env_value) %>%
+
+  # remove NA values identified previously, including those in the new 'wide columns':
+  drop_na(landscape, vegetation, lion_presence, distance_to_water_km, average_annual_rainfall_mm, predator_density_per_sq_km) 
+
+
+# fix typos in lion_presence (no need to remove as very clearly 'Present' or 'Absent' typos)
+df_clean$lion_presence[df_clean$lion_presence == "Preesnt"] <- "Present" 
+df_clean$lion_presence[df_clean$lion_presence == "Preseet"] <- "Present"
+df_clean$lion_presence[df_clean$lion_presence == "Asbent"] <- "Absent"
+
+# check cleaned data 
+describe(df_clean)
+```
+
+This `clean_df` now has no missing variables, fixed `lion_presence' data, no statistical outiers based on the original `df`, and each row is an individual observation.
+
+## 3. Definition of variables
+`df_clean` contains variables as follows:  
+
+**Response:**  
+- giraffe body mass  
+
+**Predictors (fixed):**  
+ - Categorical = landscape, vegetation, lion presence  
+ - Continuous = distance to water, rainfall, and predator density  
+ 
+**Predictors (random)**
+ - Groups/grouping: park, observer   
+ 
+These data are spatially structured, and no information on temporal structure is provided. Also need to consider which random effects will be considered as slopes or intercepts, and any interactions when forming models.  
+
+The response (body mass) is continuous and $\geq$ 0, which allows for Gaussian and/or Gamma if a GLMM is to be used.
+ 
+
+## 4. Raw data exploration
+### 4.1 Viewing summaries for potential random effect variables:
+For a summary of giraffe mass across each of the four parks:
+
+```{r}
+# mass across parks
+mass_parks <- df_clean %>%
+  group_by(park) %>%
+  summarise(mean_mass = mean(body_mass))
+
+mass_parks
+```
+
+And as a violin plot:
+
+```{r}
+# violin for mass across parks
+plot_mass_parks <- df_clean %>%
+  
+  ggplot(mapping = aes(x = park, y = body_mass)) +
+  
+  # violin plot 
+  geom_violin(aes(fill = park)) + 
+  
+  # hide redundant legend
+  guides(fill = "none") +
+  
+  # aesthetics
+  geom_boxplot(width = 0.1, col = "black")+
+  ggtitle("Violin plot of giraffe mass across the parks") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ylab("Body mass (kg)") + 
+  xlab("Park") 
+
+plot_mass_parks
+```
+
+Zebra Horizon Park appears to have a slightly raised mean giraffe mass copared to the other three parks.  
+
+For the sorted mean across each combination of the variables `landscape`, `lion_presence`, `vegetation`, and `oberver` to get a general idea if any of these appear to have a strong impact over the others in terms of giraffe mass (any particular groupings at the top, for instance):
+
+```{r, message=FALSE, error=FALSE}
+mass_lvl <- df_clean %>%
+  group_by(landscape, lion_presence, vegetation, observer) %>%
+  
+  # create mean mass for summary
+  summarise(mean_mass = mean(body_mass)) %>%
+  
+  # sort by descending mean mass
+  arrange(desc(mean_mass))
+
+mass_lvl
+```
+
+The top four mean mass values are all observer 1, so potential for bias from this observer, but just an idea. 
+
+### 4.2 Scatter plots of continuous variables across each park
+Log distance to water:
+
+```{r}
+# Log distance to water vs body mas scatter plot
+plot_water <- df_clean %>%
+  
+  # log the distance to water
+  ggplot(aes(x=log(distance_to_water_km+ 1), y=body_mass)) +
+  
+  # plot data points
+  geom_point(col="coral1") +
+  
+  # add linear regression
+  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x) +
+  
+  # aesthetics
+  xlab("log Distance to water") +
+  ylab("Body mass (kg)") +
+  
+  # group by park
+  facet_wrap(. ~ park) +
+  theme_lucid() 
+
+plot_water
+```
+
+The distance to water appears to have a slight positive effect on body mass across 3 out of the 4 parks.
+
+Average rainfall:
+
+```{r}
+plot_rain <- df_clean %>%
+  
+  # average rainfall to body mass
+  ggplot(aes(x=average_annual_rainfall_mm, y=body_mass)) +
+  
+  # add data points
+  geom_point(col="#9EB9F3") +
+  
+  # add linear regression
+  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x) +
+  
+  # aesthetics
+  xlab("Average annual rainfall (mm)") +
+  ylab("Body mass (kg)") +
+  
+  # group by park
+  facet_wrap(. ~ park) +
+  theme_lucid() 
+
+plot_rain
+```
+
+Average annual rainfall appears to have a slight positive effect on body mass in 3 out of the 4 parks.
+
+Predator density:
+
+```{r}
+plot_predator <- df_clean %>%
+  
+  # log the predator density
+  ggplot(aes(x=log(predator_density_per_sq_km), y=body_mass)) +
+  
+  # add data points
+  geom_point(col="#F89C74") +
+  
+  # add linear regression
+  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x) +
+  
+  # aesthetics
+  xlab("log Predator density per square kilometre") +
+  ylab("Body mass (kg)") +
+  
+  # group by park
+  facet_wrap(. ~ park) +
+  theme_lucid() 
+
+plot_predator
+```
+
+Predator density doesn't appear to have a strong relationship with body mass across the parks.
+
+
+### 4.3 Distribution and normality checks
+The response variable is body mass of the giraffes. This is a continuous and strictly positive, and as such the main families involved for a model are likely Gaussian and Gamma. Gaussian requires a normal distribution, while Gamma typically fits skewed data more reliably. To suggest a family QQ plots and histograms will be plotted.  
+
+Histogram with overlaid normal of body mass in clean data:
+
+```{r, message=FALSE, error=FALSE}
+mass_hist_clean <- df_clean %>%
+  
+  ggplot(aes(x = body_mass)) +
+  
+  # add histogram with bin width at 50kg and scale using ..density..
+  geom_histogram(aes(y = ..density..), fill = "coral1", color = "black", binwidth = 50) +
+  
+  # add a normal distribution to plot 
+  stat_function(fun = dnorm,
+                args = list(
+                  mean = mean(df_clean$body_mass),
+                  sd = sd(df_clean$body_mass)
+                  )) +
+  
+  # aesthetics
+  theme_minimal() +
+  labs(title = "Histogram of giraffe body mass") +
+  xlab("Body mass (kg)") +
+  ylab("Density") 
+
+mass_hist_clean
+```
+
+Histogram indicates a right skewed body mass in this cleaned data, but approximately normal.
+
+Test QQ-plot across body mass in clean dataset:
+
+```{r}
+ggqqplot(df_clean$body_mass,
+         title = "QQ plot of body mass")
+```
+
+This QQ plot is skewed with tailed a end at lower masses, indicating a right skew and less extreme values at lower masses than expected compared to the reference line. Log transormation of the body mass will be attampted next.
+
+```{r}
+# create log body mass column
+df_clean <- df_clean %>%
+  mutate(log_body_mass = log(body_mass))
+
+# check if column has been created
+head(df_clean$log_body_mass)
+```
+
+Histogram of log transformed body mass:
+
+```{r, message=FALSE, error=FALSE}
+mass_hist_clean_log <- df_clean %>%
+  
+  ggplot(aes(x = log_body_mass)) +
+  
+  # add histogram with bin width at 50kg and scale using ..density..
+  geom_histogram(aes(y = ..density..), fill = "#154360", color = "black", binwidth = 0.05) +
+  
+  # add a normal distribution to plot 
+  stat_function(fun = dnorm,
+                args = list(
+                  mean = mean(df_clean$log_body_mass),
+                  sd = sd(df_clean$log_body_mass)
+                  )) +
+  
+  # aesthetics
+  theme_minimal() +
+  labs(title = "Histogram of log giraffe body mass") +
+  xlab("Log dody mass (kg)") +
+  ylab("Density") 
+
+mass_hist_clean_log
+```
+
+Using the natural logarithm of the body mass approximates a normal distribution more closely than the raw body mass.  
+
+QQ plot for these transformed data:
+
+```{r}
+ggqqplot(df_clean$log_body_mass,
+         title = "QQ plot of log-transformed body mass")
+```
+
+This appears to be a more normally distributed QQ plot with a more compressed upper tail. Box-Cox trsnaformation from `MASS` will be used to calculate a log-likelihood number which best approximates normal using these body mass data as oppposed to simply accepting log: 
+
+```{r}
+# first creat a linear model of the body mass, intercept only
+lm_body_mass  <- lm(body_mass ~ 1, df_clean)
+
+# apply box-cos to generate a log-likelihood plot which tests lambda form -2 to 2, step 0.1
+boxcox(lm_body_mass, lambda = seq(-2, 2, 0.1))
+```
+
+From this the highest log-likelihood appears to be approximately 0.25 which is ~ a cube root (1/3). Will attempt a cube root transformation too:
+
+```{r}
+# create log body mass column
+df_clean <- df_clean %>%
+  
+  # add cube root transformed column
+  mutate(cube_body_mass = body_mass^(1/3))
+
+# check if column has been created
+head(df_clean$cube_body_mass)
+```
+
+QQ plot for cube root transformed mass: 
+
+```{r}
+ggqqplot(df_clean$cube_body_mass,
+         title = "QQ plot of cube root-transformed body mass")
+```
+
+This cube root-transformed data appears to approximate normal slightly better than the raw mass and log-transformed mass. However these changes are small and do not reflect how the residuals will turn out after creating the model, so won't make a hard decision here. 
+
+### 4.4 Family checks
+Will use `fitdistr` to check family fits.
+
+```{r}
+# normal with raw
+plot(fitdist(df_clean$body_mass, "norm"))
+
+# gamma with raw
+plot(fitdist(df_clean$body_mass, "gamma"))
+
+# normal with log-transformed
+plot(fitdist(df_clean$log_body_mass, "norm"))
+
+# normal with cube root-transformed
+plot(fitdist(df_clean$cube_body_mass, "norm"))
+```
+
+All of these plots show that the data (raw and transformed) are able to fit Gaussian and Gamma (for raw data) well. Will move on to fitting candidate models and then testing these.
+
+
+## 5. Model formation
+Before forming any models any numeric predictor values will be standardised using `scale()` such that they represent a mean of 0 and standard deviation of 1, which can help model optimisation.  
+
+```{r}
+# scale numeric predictor variables in df_clean:
+df_clean <- df_clean %>% 
+  mutate(
+    scaled_rainfall = scale(average_annual_rainfall_mm),
+    scaled_predators = scale(predator_density_per_sq_km),
+    scaled_water_distance = scale(distance_to_water_km)
+    )
+  
+# check new columns
+head(df_clean$scaled_rainfall)
+head(df_clean$scaled_predators)
+head(df_clean$scaled_water_distance)
+```
+### A) Gaussian Model
+The first model will be a GLMM with the Gaussian family (identity link), including all predictor variables to capture all potential effects of predictors on the response. Predictors can be dropped further down the line if necessary.  
+
+Random effects will be included for park and observer as interceps and not as random slopes as the effects of the predictors on the response is the same across both sets of groups. Also with a small number of level in each group (4 and 5 only) using random slopes could be unstable while also adding complexity to the model.
+
+```{r}
+ # glmm using glmmTMB
+ glmm_gauss <- glmmTMB(
+  
+  # fixed effects
+  body_mass ~ landscape +
+    vegetation +
+    lion_presence +
+    scaled_water_distance +
+    scaled_rainfall +
+    scaled_predators + 
+    
+    # park as random effect - each gets own intercept
+    (1 | park) +
+    # observer as random effect - each gets own intercept
+    (1 | observer),
+  
+  data = df_clean,
+  
+  # using gaussian family
+  family = gaussian()
+)
+```
+
+Warning error produced upon creation:
+```
+Warning in finalizeTMB(TMBStruc, obj, fit, h, data.tmb.old) :
+Model convergence problem; non-positive-definite Hessian matrix. See vignette('troubleshooting')
+```
+This error suggests an error in computing standard errors, meaning this model is essentially untrustworthy. Will check for perfect collinearity below in case this is the reason. 
+
+```{r}
+# test which predictors may be perfectly collinear in gauss model
+matrix_gauss <- model.matrix(glmm_gauss)
+findLinearCombos(matrix_gauss)
+```
+
+No perfectly collinear predictors found, error may be due to an overly complex model. However, residual and model checks can still take place.
+
+A. Gauss model assessment
+A.1 Check model summary:
+ 
+```{r}
+ summary(glmm_gauss)
+```
+
+A.2 Residual checks with `DHARMa`:
+`DHARMa` tests simulate residuals from models by simulating repeated datasets using the model. It then tests where the observed data fall in thissimulated distribution. If the model is a good fit the residuals should follow a uniform pattern, and if not then it represents a misfit with the model.
+
+```{r}
+glmm_gauss_check <- simulateResiduals(fittedModel = glmm_gauss)
+plot(glmm_gauss_check)
+```
+ 
+These simulates residuals from the GLMM show no deviation from the expected distribution indicating that the model assumptions were well met.
+
+A.3 Multicollinearity check
+
+```{r}
+check_collinearity(glmm_gauss)
+```
+
+A.4 Overdispersion checks
+Testing whether a greater variability of data is seen when using the model compared to the actual observed data:
+
+```{r}
+check_overdispersion(glmm_gauss)
+```
+
+None detected
+
+A.5 `performance` model check
+`check_model` tests a fitted model for normality of residuals, normality of random effects, linear relationship, homogeneity of variance, and multicollinearity:
+
+```{r, fig.width=10, fig.height=10}
+# run check model
+check_model(glmm_gauss)
+```
+
+
+### B) Gamma Model (second GLMM)
+Will also form a GLMM with a Gamma family and log link, again using all predictor variables.
+
+```{r}
+glmm_gamma <- glmmTMB(
+  
+  body_mass ~ landscape +
+    vegetation +
+    lion_presence +
+    scaled_water_distance +
+    scaled_rainfall +
+    scaled_predators + 
+    
+    # park as random effect - each gets own intercept
+    (1 | park) +
+    # observer as random effect - each gets own intercept
+    (1 | observer),
+  
+  data = df_clean,
+  
+  # gamma with log link
+  family = Gamma(link = "log")
+)
+```
+
+B. Gamma model assessment
+B.1 Check model summary:
+ 
+```{r}
+ summary(glmm_gamma)
+```
+
+B.2 Residual checks with DHARMa:
+
+```{r}
+glmm_gamma_check <- simulateResiduals(fittedModel = glmm_gamma)
+plot(glmm_gamma_check)
+```
+ 
+Again, these simulates residuals from the GLMM show no deviation from the expected distribution indicating that the model assumptions were well met.
+
+B.3 Collinearity check
+
+```{r}
+check_collinearity(glmm_gamma)
+```
+
+B.4 Overdispersion checks
+
+```{r}
+check_overdispersion(glmm_gamma)
+```
+
+None detected
+
+B.5 `performance` model check
+
+```{r, fig.width=10, fig.height=10}
+# run check model
+check_model(glmm_gamma)
+```
+
+### C) Log-transformed Gaussian Model (third GLMM)
+Based on earlier data distribution checks and normality checking, and to try to mitigate the error from the first gaussian model, a log(response)-transformed gaussian GLMM will also be formed including all predictors:
+
+```{r}
+glmm_gauss2 <- glmmTMB(
+  
+  # log transformed response 
+  log(body_mass) ~ landscape +
+    vegetation +
+    lion_presence +
+    scaled_water_distance +
+    scaled_rainfall +
+    scaled_predators + 
+    
+    # park as random effect - each gets own intercept
+    (1 | park) +
+    # observer as random effect - each gets own intercept
+    (1 | observer),
+  
+  data = df_clean,
+  family = gaussian()
+)
+```
+
+C. Gauss2 model assessment
+C.1 Check model summary:
+ 
+```{r}
+ summary(glmm_gauss2)
+```
+
+C.2 Residual checks with DHARMa:
+
+```{r}
+glmm_gauss2_check <- simulateResiduals(fittedModel = glmm_gauss2)
+plot(glmm_gauss2_check)
+```
+ 
+Again, these simulates residuals from the GLMM show no deviation from the expected distribution indicating that the model assumptions were well met.
+
+C.3 Collinearity check
+
+```{r}
+check_collinearity(glmm_gauss2)
+```
+
+C.4 Overdispersion checks
+
+```{r}
+check_overdispersion(glmm_gauss2)
+```
+
+None detected
+
+C.5 `performance` model check
+
+```{r, fig.width=10, fig.height=10}
+# run check model
+check_model(glmm_gauss2)
+```
+
+
+### D) Cube root-transformed Gaussian Model (fourth GLMM)
+Based on earlier data distribution checks and normality checking, a cube root-transformed response gaussian GLMM will also be formed including all predictors:
+
+```{r}
+glmm_gauss3 <- glmmTMB(
+  
+  # cube root-transformed response 
+    cube_body_mass ~ landscape +
+    vegetation +
+    lion_presence +
+    scaled_water_distance +
+    scaled_rainfall +
+    scaled_predators + 
+    
+    # park as random effect - each gets own intercept
+    (1 | park) +
+    # observer as random effect - each gets own intercept
+    (1 | observer),
+  
+  data = df_clean,
+  
+  family = gaussian()
+)
+```
+
+D. Gauss model assessment
+D.1 Check model summary:
+ 
+```{r}
+ summary(glmm_gauss3)
+```
+
+D.2 Residual checks with DHARMa:
+
+```{r}
+glmm_gauss3_check <- simulateResiduals(fittedModel = glmm_gauss3)
+plot(glmm_gauss3_check)
+```
+
+Again, these simulates residuals from the GLMM show no deviation from the expected distribution indicating that the model assumptions were well met.
+
+D.3 Collinearity check
+
+```{r}
+check_collinearity(glmm_gauss3)
+```
+
+D.4 Overdispersion checks
+
+```{r}
+check_overdispersion(glmm_gauss3)
+```
+
+None detected
+
+D.5 `performance` model check
+
+```{r, fig.width=10, fig.height=10}
+# run check model
+check_model(glmm_gauss3)
+```
+
+
+## 6. Model testing
+As there are currently four models which have all passed preliminary `DHARMa` residual and `check_model()` checks, they can be pitted against each other directly using `AIC` (Akaike information criterion) and `BIC` (Bayesian information criterion) tests.  
+
+These two tests try to balance how well a model fits with its complexiy (models with more parameters are penalised harder to avoid overfitting). A lower score indicates a batter model in both AIC and BIC, with BIC penaising complexity more than AIC.  
+
+AIC:
+
+```{r}
+AIC(glmm_gauss, glmm_gamma, glmm_gauss2, glmm_gauss3)
+```
+
+BIC:
+
+```{r}
+BIC(glmm_gauss, glmm_gamma, glmm_gauss2, glmm_gauss3)
+```
+
+In both AIC and BIC tests `glmm_gauss2` scored the lowest of all models (`glmm_gauss` received N/A, likely due to inability in computing standard errors when it was made). From this, `glmm_gauss2` will be taken forward as the candidate model.
+
+A visualistaion of the above tests with plotting of observed mass vs predicted mass from each model, using `modelbased`:
+
+```{r, message=FALSE, error=FALSE}
+# set scaled values to numeric from a matrix:
+df_clean <- df_clean %>%
+  mutate(
+    scaled_rainfall = as.numeric(scale(average_annual_rainfall_mm)),
+    scaled_predators = as.numeric(scale(predator_density_per_sq_km)),
+    scaled_water_distance = as.numeric(scale(distance_to_water_km))
+  )
+
+# get predicted data frame for each model using estimate_expectation()
+pred_gamma <- estimate_expectation(glmm_gamma)
+pred_gauss <- estimate_expectation(glmm_gauss)
+pred_gauss2 <- estimate_expectation(glmm_gauss2)
+pred_gauss3 <- estimate_expectation(glmm_gauss3)
+
+# create df of predicted values based off models' body mass (stored as 'Predicted')
+models_predictions <- tibble(
+  observed = df_clean$body_mass,
+  predicted_gamma = pred_gamma$Predicted,
+  predicted_gauss = pred_gauss$Predicted,
+  # back transform to fit on correct axis:
+  # exponentiate predicted
+  predicted_gauss2 = exp(pred_gauss2$Predicted),
+  # cube predicted
+  predicted_gauss3 = (pred_gauss3$Predicted)^3
+)
+
+# create observed vs. predicted plot for all models:
+models_predictions %>%
+  
+  ggplot() +
+  # add points from each model including gauss2 model
+  geom_smooth(aes(x = observed, y = predicted_gamma, colour = "gamma"), method = "lm", se = FALSE) +
+  geom_smooth(aes(x = observed, y = predicted_gauss, colour = "gauss"), method = "lm", se = FALSE) +
+  geom_smooth(aes(x = observed, y = predicted_gauss2, colour = "gauss2"), method = "lm", se = FALSE) +
+  geom_smooth(aes(x = observed, y = predicted_gauss3, colour = "gauss3") , method = "lm", se = FALSE) +
+  
+  # 1:1 observed body mass from df_clean
+  geom_line(aes(x = observed, y = observed), linetype = "dashed") +
+  
+  # adding a legend 
+  scale_colour_manual(name = NULL,
+                     breaks = c("gamma", "gauss", "gauss2", "gauss3"),
+                     labels = c("Gamma Model", "Gauss Model", "Gauss2 Model", "Gauss3 Model"),
+                     values = c("#1ABC9C", "#154360", "#FF5733", "#FFC300")) +
+  
+  ggtitle("Observed vs Predicted body mass for each model") +
+  ylab("Body mass (predicted)") +
+  xlab("Body mass (observed)") +
+  theme_lucid()
+
+```
+
+As the dashed line is a 1:1 observed set of values, clearly all of the model plots are over fitting at lower masses, and under fitting at higher masses, despite passing residual and other model checks earlier. Attempts will be made to refine the models further to better predict observed values if possible while not overfitting. 
+
+## 7. Model refining
+With `glmm_gauss3` selected as the candidate model, model parameters will next be refined and further testing will take place, along with visualisation, in order to determine the most representative model for these data.
+
+```{r}
+# another look at model summary
+summary(glmm_gauss2)
+```
+
+From this, only the water distance variable appears to be significant as a predictor on body mass in these giraffes. 
+
+
+### 7.1 Model simplifying
+From the summary above I can see the there are two very non-significant predictors: `scaled_predators` (0.956) and `lion_presencePresent` (0.452). Both of these are clearly related too, and a model will be made without them to test if it may be simplified:
+
+```{r}
+glmm_gauss4 <- glmmTMB(
+  
+  # log transformed response with any predator predictors removed
+  log(body_mass) ~ landscape +
+    vegetation +
+    scaled_water_distance +
+    scaled_rainfall +
+
+    # park as random effect - each gets own intercept
+    (1 | park) +
+    # observer as random effect - each gets own intercept
+    (1 | observer),
+  
+  data = df_clean,
+  family = gaussian()
+)
+```
+
+Gauss5 model assessment.  
+Check model summary:
+ 
+```{r}
+ summary(glmm_gauss4)
+```
+
+
+```{r}
+glmm_gauss4_check <- simulateResiduals(fittedModel = glmm_gauss4)
+plot(glmm_gauss4_check)
+```
+```{r, fig.width=10, fig.height=10}
+check_model(glmm_gauss4)
+```
+
+`check_model` and DHARMa residual tests all passed, so on to AIC and BIC tests:
+
+```{r}
+AIC(glmm_gauss, glmm_gamma, glmm_gauss2, glmm_gauss3, glmm_gauss4)
+```
+
+```{r}
+BIC(glmm_gauss, glmm_gamma, glmm_gauss2, glmm_gauss3, glmm_gauss4)
+```
+
+Here `glmm_gauss4` scored lower than all other models, placing it as the current candidate model. 
+
+
+# next step: look at marginal effects
+
+
+
+
+
+
+

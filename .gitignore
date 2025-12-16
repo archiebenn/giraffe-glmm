@@ -2,8 +2,11 @@
 .Rhistory
 .Rprofile
 .RData
+.Rproj.user
 
 # ignore folders
 renv/library/
 
-.Rproj.user
+# HTMLs
+*.html
+
