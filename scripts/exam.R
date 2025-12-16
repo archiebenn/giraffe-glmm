@@ -25,7 +25,7 @@ library(modelbased)
 ##### 
 
 # read in the full dataset (as a tibble)
-df <- read_tsv("mass_sj19031.tsv")
+df <- read_tsv("data/mass_sj19031.tsv")
 
 # check class (= data.frame/tibble)
 class(df)
@@ -176,9 +176,6 @@ qqplot_mass <- df_clean %>%
   ggqqplot(x = "body_mass")
 qqplot_mass
 
-
-qqplot_mass <- df_clean %>%
-  x = log(body_mass)
 
 # want to try cox-bos to estimate best trsnaformation off linear model to approximte normal:
 lm_body_mass  <- lm(body_mass ~ 1, df_clean)

@@ -35,7 +35,11 @@ library(modelbased)
 Load in the data (tsv file saved from GitHub) as a tibble:
 
 ```{r}
-df <- read_tsv("mass_sj19031.tsv")
+getwd()
+```
+
+```{r}
+df <- read_tsv("../data/mass_sj19031.tsv")
 
 # check class (= data.frame/tibble)
 class(df)
@@ -185,8 +189,10 @@ plot_mass_parks <- df_clean %>%
   # hide redundant legend
   guides(fill = "none") +
   
-  # aesthetics
+  # add boxplot 
   geom_boxplot(width = 0.1, col = "black")+
+  
+  # aesthetics
   ggtitle("Violin plot of giraffe mass across the parks") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45)) +
@@ -229,10 +235,11 @@ plot_water <- df_clean %>%
   geom_point(col="coral1") +
   
   # add linear regression
-  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x, linetype = "dashed") +
   
   # aesthetics
-  xlab("log Distance to water") +
+  ggtitle("Scatter plot of giraffe mass against log(distance to water) across each of the parks") +
+  xlab("log(Distance to water (km))") +
   ylab("Body mass (kg)") +
   
   # group by park
@@ -256,9 +263,10 @@ plot_rain <- df_clean %>%
   geom_point(col="#9EB9F3") +
   
   # add linear regression
-  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x, linetype = "dashed") +
   
   # aesthetics
+  ggtitle("Scatter plot of giraffe mass against average annual rainfall across each of the parks") +
   xlab("Average annual rainfall (mm)") +
   ylab("Body mass (kg)") +
   
@@ -283,10 +291,11 @@ plot_predator <- df_clean %>%
   geom_point(col="#F89C74") +
   
   # add linear regression
-  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", formula = y~x, linetype = "dashed") +
   
   # aesthetics
-  xlab("log Predator density per square kilometre") +
+  ggtitle("Scatter plot of giraffe mass against log(predator density) across each of the parks") +
+  xlab("log(Predator density per square kilometre)") +
   ylab("Body mass (kg)") +
   
   # group by park
@@ -383,7 +392,7 @@ ggqqplot(df_clean$log_body_mass,
          title = "QQ plot of log-transformed body mass")
 ```
 
-This appears to be a more normally distributed QQ plot with a more compressed upper tail. Box-Cox trsnaformation from `MASS` will be used to calculate a log-likelihood number which best approximates normal using these body mass data as oppposed to simply accepting log: 
+This appears to be a more normally distributed QQ plot with a more compressed upper tail. A Box-Cox transformation from `MASS` will be used to calculate a log-likelihood number which best approximates normal using these body mass data: 
 
 ```{r}
 # first creat a linear model of the body mass, intercept only
@@ -413,22 +422,22 @@ ggqqplot(df_clean$cube_body_mass,
          title = "QQ plot of cube root-transformed body mass")
 ```
 
-This cube root-transformed data appears to approximate normal slightly better than the raw mass and log-transformed mass. However these changes are small and do not reflect how the residuals will turn out after creating the model, so won't make a hard decision here. 
+This cube root-transformed data appears to approximate normal slightly better than the raw mass and log-transformed mass. However these changes are small and do not reflect how the residuals will turn out after creating the model, so raw and the above two transformations will be included in model creation. 
 
 ### 4.4 Family checks
 Will use `fitdistr` to check family fits.
 
 ```{r}
-# normal with raw
+# normal with raw body mass
 plot(fitdist(df_clean$body_mass, "norm"))
 
-# gamma with raw
+# gamma with raw body mass
 plot(fitdist(df_clean$body_mass, "gamma"))
 
-# normal with log-transformed
+# normal with log-transformed body mass
 plot(fitdist(df_clean$log_body_mass, "norm"))
 
-# normal with cube root-transformed
+# normal with cube root-transformed body mass
 plot(fitdist(df_clean$cube_body_mass, "norm"))
 ```
 
@@ -436,38 +445,25 @@ All of these plots show that the data (raw and transformed) are able to fit Gaus
 
 
 ## 5. Model formation
-Before forming any models any numeric predictor values will be standardised using `scale()` such that they represent a mean of 0 and standard deviation of 1, which can help model optimisation.  
+Generalised Linear Mixed (effect) Models (GLMMs) will be created here using the `glmmTMB` function. Multiple models will be formed based on different family and response parameters before undergoing intital residual and model testing, followed by statistical comparisons between models to select the most appropriate to take forward.
 
-```{r}
-# scale numeric predictor variables in df_clean:
-df_clean <- df_clean %>% 
-  mutate(
-    scaled_rainfall = scale(average_annual_rainfall_mm),
-    scaled_predators = scale(predator_density_per_sq_km),
-    scaled_water_distance = scale(distance_to_water_km)
-    )
-  
-# check new columns
-head(df_clean$scaled_rainfall)
-head(df_clean$scaled_predators)
-head(df_clean$scaled_water_distance)
-```
 ### A) Gaussian Model
 The first model will be a GLMM with the Gaussian family (identity link), including all predictor variables to capture all potential effects of predictors on the response. Predictors can be dropped further down the line if necessary.  
 
-Random effects will be included for park and observer as interceps and not as random slopes as the effects of the predictors on the response is the same across both sets of groups. Also with a small number of level in each group (4 and 5 only) using random slopes could be unstable while also adding complexity to the model.
+Random effects will be included for park and observer as intercepts and not as random slopes as the effects of the predictors on the response is assumed to be the same across both sets of groups. Also with a small number of levels in each group (4 and 5 only), using random slopes could be unstable while also adding complexity to the model. 
 
-```{r}
- # glmm using glmmTMB
- glmm_gauss <- glmmTMB(
-  
-  # fixed effects
+
+```{r, error=FALSE, message=FALSE}
+# glmm using glmmTMB
+glmm_gauss <- glmmTMB(
+
+  # fixed effects:
   body_mass ~ landscape +
     vegetation +
     lion_presence +
-    scaled_water_distance +
-    scaled_rainfall +
-    scaled_predators + 
+    distance_to_water_km +
+    average_annual_rainfall_mm +
+    predator_density_per_sq_km + 
     
     # park as random effect - each gets own intercept
     (1 | park) +
@@ -486,10 +482,10 @@ Warning error produced upon creation:
 Warning in finalizeTMB(TMBStruc, obj, fit, h, data.tmb.old) :
 Model convergence problem; non-positive-definite Hessian matrix. See vignette('troubleshooting')
 ```
-This error suggests an error in computing standard errors, meaning this model is essentially untrustworthy. Will check for perfect collinearity below in case this is the reason. 
+This error suggests an error in computing standard errors, meaning this model is essentially untrustworthy. Will also check for perfect collinearity below in case this is the reason. 
 
 ```{r}
-# test which predictors may be perfectly collinear in gauss model
+# test if any predictors are perfectly collinear in this gauss model
 matrix_gauss <- model.matrix(glmm_gauss)
 findLinearCombos(matrix_gauss)
 ```
@@ -503,8 +499,10 @@ A.1 Check model summary:
  summary(glmm_gauss)
 ```
 
+This model summary contains no standard errors. `park` and `observer` as random effects have very low variances here, so the model may be treating them as fixed effects which can cause errors. Will continue with next checks and build further models.
+
 A.2 Residual checks with `DHARMa`:
-`DHARMa` tests simulate residuals from models by simulating repeated datasets using the model. It then tests where the observed data fall in thissimulated distribution. If the model is a good fit the residuals should follow a uniform pattern, and if not then it represents a misfit with the model.
+`DHARMa` tests simulate residuals from models by simulating repeated datasets using the model. It then tests where the observed data fall in thissimulated distribution. If the model is a good fit the residuals should follow a uniform pattern, and if not the model may be misfit and unsuitable.
 
 ```{r}
 glmm_gauss_check <- simulateResiduals(fittedModel = glmm_gauss)
@@ -516,8 +514,10 @@ These simulates residuals from the GLMM show no deviation from the expected dist
 A.3 Multicollinearity check
 
 ```{r}
-check_collinearity(glmm_gauss)
+# check_collinearity(glmm_gauss)
 ```
+
+This `check_collinearity()` did not work ("data frame is empty") -> likely cause is the Hessian error from during the build. Again, checks will continue.
 
 A.4 Overdispersion checks
 Testing whether a greater variability of data is seen when using the model compared to the actual observed data:
@@ -533,8 +533,10 @@ A.5 `performance` model check
 
 ```{r, fig.width=10, fig.height=10}
 # run check model
-check_model(glmm_gauss)
+# check_model(glmm_gauss)
 ```
+
+This also did not work, as such `glmm_gauss` is not suitable as it stands to be a candidate model, and further models will be made. The main cause is probably due to very low variance values from the random effects (scale of e-17 and e-11), so the model essentially treats them as fixed which can cause Hessian errors when calculating standard errors.
 
 
 ### B) Gamma Model (second GLMM)
@@ -546,9 +548,9 @@ glmm_gamma <- glmmTMB(
   body_mass ~ landscape +
     vegetation +
     lion_presence +
-    scaled_water_distance +
-    scaled_rainfall +
-    scaled_predators + 
+    distance_to_water_km +
+    average_annual_rainfall_mm +
+    predator_density_per_sq_km +  
     
     # park as random effect - each gets own intercept
     (1 | park) +
@@ -569,6 +571,8 @@ B.1 Check model summary:
  summary(glmm_gamma)
 ```
 
+Much larger variances for the random effects compared to `glmm_gauss`, and standard errors calculated.
+
 B.2 Residual checks with DHARMa:
 
 ```{r}
@@ -584,13 +588,15 @@ B.3 Collinearity check
 check_collinearity(glmm_gamma)
 ```
 
+Low correlation for multicollinearity across these predictors which is good.
+
 B.4 Overdispersion checks
 
 ```{r}
 check_overdispersion(glmm_gamma)
 ```
 
-None detected
+None detected which is good.
 
 B.5 `performance` model check
 
@@ -609,9 +615,9 @@ glmm_gauss2 <- glmmTMB(
   log(body_mass) ~ landscape +
     vegetation +
     lion_presence +
-    scaled_water_distance +
-    scaled_rainfall +
-    scaled_predators + 
+    distance_to_water_km +
+    average_annual_rainfall_mm +
+    predator_density_per_sq_km +  
     
     # park as random effect - each gets own intercept
     (1 | park) +
@@ -671,9 +677,9 @@ glmm_gauss3 <- glmmTMB(
     cube_body_mass ~ landscape +
     vegetation +
     lion_presence +
-    scaled_water_distance +
-    scaled_rainfall +
-    scaled_predators + 
+    distance_to_water_km +
+    average_annual_rainfall_mm +
+    predator_density_per_sq_km +  
     
     # park as random effect - each gets own intercept
     (1 | park) +
@@ -746,17 +752,9 @@ In both AIC and BIC tests `glmm_gauss2` scored the lowest of all models (`glmm_g
 A visualistaion of the above tests with plotting of observed mass vs predicted mass from each model, using `modelbased`:
 
 ```{r, message=FALSE, error=FALSE}
-# set scaled values to numeric from a matrix:
-df_clean <- df_clean %>%
-  mutate(
-    scaled_rainfall = as.numeric(scale(average_annual_rainfall_mm)),
-    scaled_predators = as.numeric(scale(predator_density_per_sq_km)),
-    scaled_water_distance = as.numeric(scale(distance_to_water_km))
-  )
-
-# get predicted data frame for each model using estimate_expectation()
-pred_gamma <- estimate_expectation(glmm_gamma)
+# get predicted data frame for each model based on the observed predictor values at each observation using estimate_expectation()
 pred_gauss <- estimate_expectation(glmm_gauss)
+pred_gamma <- estimate_expectation(glmm_gamma)
 pred_gauss2 <- estimate_expectation(glmm_gauss2)
 pred_gauss3 <- estimate_expectation(glmm_gauss3)
 
@@ -801,18 +799,15 @@ models_predictions %>%
 As the dashed line is a 1:1 observed set of values, clearly all of the model plots are over fitting at lower masses, and under fitting at higher masses, despite passing residual and other model checks earlier. Attempts will be made to refine the models further to better predict observed values if possible while not overfitting. 
 
 ## 7. Model refining
-With `glmm_gauss3` selected as the candidate model, model parameters will next be refined and further testing will take place, along with visualisation, in order to determine the most representative model for these data.
+With `glmm_gauss2` selected as the candidate model, model parameters will next be refined and further testing will take place, along with visualisation, in order to determine the most representative model for these data.
 
+Another summary of `glmm_gauss2`:
 ```{r}
-# another look at model summary
 summary(glmm_gauss2)
 ```
 
-From this, only the water distance variable appears to be significant as a predictor on body mass in these giraffes. 
-
-
 ### 7.1 Model simplifying
-From the summary above I can see the there are two very non-significant predictors: `scaled_predators` (0.956) and `lion_presencePresent` (0.452). Both of these are clearly related too, and a model will be made without them to test if it may be simplified:
+From the summary above I can see that only `distance_to_water_km` is a significant predictor in giraffe body mass in this model, and that there are two very non-significant predictors: `preditor_density_per_sq_km` (0.956) and `lion_presencePresent` (0.452). Both of these are clearly related too, and a model will be made without them to test if it may be simplified:
 
 ```{r}
 glmm_gauss4 <- glmmTMB(
@@ -820,8 +815,8 @@ glmm_gauss4 <- glmmTMB(
   # log transformed response with any predator predictors removed
   log(body_mass) ~ landscape +
     vegetation +
-    scaled_water_distance +
-    scaled_rainfall +
+    distance_to_water_km +
+    average_annual_rainfall_mm +
 
     # park as random effect - each gets own intercept
     (1 | park) +
@@ -833,13 +828,14 @@ glmm_gauss4 <- glmmTMB(
 )
 ```
 
-Gauss5 model assessment.  
 Check model summary:
  
 ```{r}
  summary(glmm_gauss4)
 ```
 
+
+Check model residuals with DHARMa:  
 
 ```{r}
 glmm_gauss4_check <- simulateResiduals(fittedModel = glmm_gauss4)
@@ -859,10 +855,131 @@ AIC(glmm_gauss, glmm_gamma, glmm_gauss2, glmm_gauss3, glmm_gauss4)
 BIC(glmm_gauss, glmm_gamma, glmm_gauss2, glmm_gauss3, glmm_gauss4)
 ```
 
-Here `glmm_gauss4` scored lower than all other models, placing it as the current candidate model. 
+Here `glmm_gauss4` scored lower than all other models, as well as being simpler (8 df vs 10). This can be considered an improved model over `glmm_gauss2`, placing it as the current candidate model.  
+
+Other models were also testes but cannot be shown due to space constraints. Models with predictor interactions and random effects were included for:  
+
+- Water distance and vegetation interaction  
+- Rainfall and landscape interaction    
+- Rainfall and vegetation interaction   
+- Distance to water and landscape interaction    
+- Distance to water across parks as a random slope was also included  
+
+All of these altered models failed to improve on `glmm_gauss4` in terms of AIC/BIC scores while also adding complexity. As such the `glmm_gauss4` model will remain and be used as the final model.
 
 
-# next step: look at marginal effects
+## 8. Model interpretation
+### 8.1 Model equation
+
+Summary of `glmm_gauss4`:
+
+```{r}
+summary(glmm_gauss4)
+```
+
+Therefore `glmm_gauss4` can be expressed as:  
+$$
+\text{log(Body Mass}_{i}\text{)} = \beta_0 + \beta_1\text{Landscape}_{i} + \beta_2\text{Vegetation}_{i} + \beta_3\text{Distance to Water}_{i} + \beta_4\text{Rainfall}_{i} + b_{park[i]} + b_{observer[i]} + \epsilon_{i}
+$$
+
+Where:  
+
+- $i$ represents the observation
+- $\beta_0$ is the expected body mass when all other predictors are at reference level or mean values.  
+- $\beta$ values are the model variable coefficients  
+- $\text{Landscape}_{i}$ -> BOOL landscape value: hilly (=1) or flat (=0)  
+- $\text{Vegetation}_{i}$ -> BOOL vegetation value: open (=1) or dense (=0)  
+- $\text{Distance to Water}_{i}$ is the distance to water (km) 
+- $\text{Rainfall}_{i}$ is the average annual rainfall (mm) 
+- $b_{park[i]}$ is the intercept shift for park in observation $i$  
+- $b_{observer[i]}$ is the intercept shift for observer in observation $i$  
+- $\epsilon_{i}$ is the error term (for residual error)  
+
+With coefficients: 
+$$
+\text{log(Body Mass}_{i}\text{)} = 7.15 - 0.040\cdot\text{Landscape}_{i}\text{} - 0.038\cdot\text{Vegetation}_{i} + 0.011\cdot\text{Distance to Water}_{i}\text{(km)} - (6.16\times 10^{-5})\cdot\text{Annual Rainfall}_{i}\text{(mm)} + b_{park[i]} + b_{observer[i]} + \epsilon_{i}
+$$
+
+And back transformed:  
+$$
+\text{Body Mass}_{i} = e^{7.15 - 0.040\cdot\text{Landscape}_{i}\text{} - 0.038\cdot\text{Vegetation}_{i} + 0.011\cdot\text{Distance to Water}_{i}\text{(km)} - (6.16\times 10^{-5})\cdot\text{Annual Rainfall}_{i}\text{(mm)} + b_{park[i]} + b_{observer[i]} + \epsilon_{i}}
+$$
+
+### 8.2 Significant predictor: distance from water
+This model suggests that the only significant predictor on giraffe body mass is the Distance from water ($p = 0.032$), and its effect can be shown using the model as: 
+
+$$
+\text{Body Mass}_i \propto e^{0.011\cdot\text{Distance to Water}_{i}\text{(km)}}
+$$
+
+$$
+e^{0.011} \approx 1.011
+$$
+$$
+\therefore \text{Body Mass} \propto 1.011^{\text{Distance to Water (km)}}
+$$
+
+So the model predicts that giraffe mass increases by 1.1% for every km further from water the giraffe is when observed, all other predictors constant. 
+
+## 9. Model fit
+
+This model predictions can be plotted against the observed values to visualise how well it fits the observed data:
+
+```{r}
+# create predicted and observed data frame to get predicted values for mass from the model based on the predictor values at each true observation:
+fit_model_gauss4 <- data.frame(
+  
+  # back transform from log to get predicted on the correct scale:
+  "Predicted" = exp(predict(glmm_gauss4, type = "response")),
+  "Observed" = df_clean$body_mass
+  
+)
+
+# plot predicted vs observed with 1:1 (observed:observed) comparison line
+ggplot(fit_model_gauss4) +
+  
+  # each point (x) = observed, (y) = model prediction
+  geom_point(aes(x = Observed, y = Predicted,)) +
+  
+  # add linear regression of observed:predicted
+  geom_smooth(
+    aes(x = Observed, y = Predicted, colour = "gauss4"),
+    method = lm,
+    se = FALSE) +
+  
+  # add 1:1 linear regression to plot to check main regression
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", aes(colour = "1:1")) +
+
+  # aesthetics
+  scale_colour_manual(name = NULL,
+                      breaks = c("1:1", "gauss4"),
+                      labels = c("Observed:Observed", "Gauss4 Model"),
+                      values = c("black", "#FF5733", "red")) +
+  
+  xlab("Body mass (observed)") +
+  ylab("Body mass (predicted)") +
+  
+  ggtitle("Predicted vs. Observed Giraffe Body Mass for Gauss4 Model") +
+  theme_lucid()
+
+```
+
+Points represent the predicted mass value from the `glmm_gauss4` model based on the parameters from the true observations in the data. The fitted line shows that the model tends to over predicts lower body masses, and under predict higher body masses compared to the observed values.
+
+Variance in the observed response (log(body mass)) captured by the model vs. residual error can be quantified using `r2_nakagawa()` from `performance`:
+
+```{r}
+r2_nakagawa(glmm_gauss4)
+```
+
+From this, the conditional r-squared (random and fixed effects in the model) only capture 22.8% of the variance, with marginal r-squared (fixed effects only) capturing 3.3% of the variance. Therefore the random effects account for about 19.5% of the variance in the response.  This means that the remaining 77.2% of the variance cannot be explained by the model whicih could be caused by differences not accounted for by the chosen predictors, or other biological factors not included in the model. 
+
+## 10. Visual interpretations
+
+To visualise and interpret the model clearly, marginal means and effects will be used to interpret how each predictor affects giraffe bosy mass using the model. The package `modelbased` will be used for this.
+
+Marginal means will be used for `landscape` and `vegetation`, while marginal effects will be calculated for the continuous predictors. 
+
 
 
 
