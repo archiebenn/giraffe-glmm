@@ -608,5 +608,5 @@ models_predictions %>%
 # boxplot outlier detection: https://statsandr.com/blog/outliers-detection-in-r/
 # rstatix identify_outlier(): https://www.rdocumentation.org/packages/rstatix/versions/0.7.3/topics/identify_outliers
 # for geom_smooth: https://stackoverflow.com/questions/19699858/ggplot-adding-regression-line-equation-and-r2-with-facet
-
+# 95% confidence interval : https://carpentries-incubator.github.io/statistical-thinking-public-health/02-estimation/index.html
 
