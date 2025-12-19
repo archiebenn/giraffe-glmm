@@ -4,14 +4,14 @@ author: "Archie Benn (1935263)"
 date: "`r Sys.Date()`"
 output: html_document
 ---
+Word count: 4997 (using `pandoc BIOLM0039_exam.Rmd --to=plain | wc -w`)
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
 ## 1. Set workspace
-WORDCOUNTER: `pandoc BIOLM0039_exam.Rmd --to=plain | wc -w`
-
-
 ```{r, echo = TRUE, message=FALSE, error=FALSE}
 # reset environment
 rm(list=ls())
@@ -117,7 +117,7 @@ df_clean$lion_presence[df_clean$lion_presence == "Preseet"] <- "Present"
 df_clean$lion_presence[df_clean$lion_presence == "Asbent"] <- "Absent"
 ```
 
-`df_clean` now has no missing variables, fixed `lion_presence' typos, no statistical outiers based on the original `df`, and each row is an individual observation.
+`df_clean` now has no missing variables, fixed `lion_presence` typos, no statistical outiers based on the original `df`, and each row is an individual observation.
 
 ## 3. Variables and hypotheses
 ### 3.1 Variables
@@ -247,7 +247,7 @@ The distance to water appears to have a slight positive effect on body mass acro
 Similar plots were created for average annual rainfall and predator density, both showing weak relationships to body mass.
 
 ### 4.3 Distribution and transformation checks
-Body mass is strictly positive, as such the main families involved for a model are likely Gaussian and Gamma. A histogram of body mass and Box-Cox will be used to assess potential transformations to attempt later.
+Body mass is strictly positive and continuous, as such the main families involved for a model are likely Gaussian and Gamma. A histogram of body mass and Box-Cox will be used to assess potential transformations to attempt later.
 
 #### Histogram with overlaid reference normal distribution:
 
@@ -362,7 +362,7 @@ Not significant ($p = 0.664$), no overdispertion detected.
 check_model(glmm_gauss_log)
 ```
 
-All diagnostics indicate this model suits the data well. However, the residuals variance does seem to display some heteroscedasticity, with lower residuals at higher fitted values. This pattern may be due to missing predictors which could affect higher body masses disproportionately.
+All diagnostics indicate this model suits the data well. However, the residuals variance does seem to display slight heteroscedasticity, with lower residuals at higher fitted values. This pattern may be due to missing predictors which could affect higher body masses disproportionately, although this is not a major violation of model assumptions in this case.
 
 ### Fitting two further models
 
@@ -380,19 +380,12 @@ These two models also underwent the same checks as the log Gaussian model above,
 A visualisation of the above tests with plotting of observed mass vs predicted mass from each model, using `modelbased`:
 
 ```{r, message=FALSE, error=FALSE}
-# get predicted data frame for each model based on the observed predictor values at each observation using estimate_expectation()
-pred_gamma <- estimate_expectation(glmm_gamma)
-pred_gauss_log <- estimate_expectation(glmm_gauss_log)
-pred_gauss_cubed <- estimate_expectation(glmm_gauss_cubed)
-
-# create df of predicted values based off models' body mass (stored as 'Predicted')
+# get predicted data frame for each model based on the observed predictor values at each observation using predict()
 models_predictions <- tibble(
   observed = df_clean$body_mass,
-  predicted_gamma = pred_gamma$Predicted,
-  
-  # back transform predictions from log and cubed models:
-  predicted_gauss_log = exp(pred_gauss_log$Predicted),
-  predicted_gauss_cubed = (pred_gauss_cubed$Predicted)^3
+  predicted_gamma = predict(glmm_gamma, type = "response"),
+  predicted_gauss_log = exp(predict(glmm_gauss_log)),
+  predicted_gauss_cubed = (predict(glmm_gauss_cubed))^3
 )
 
 # create observed vs. predicted plot for all models:
@@ -421,7 +414,7 @@ models_predictions %>%
 
 ```
 
-All models display over predicting at lower masses and under predicting at higher masses, indicating an inability to adequately capture the body mass variance towards extremes. This reflects the heteroscedasticity mentioned earlier which can pull the predicted values at high body masses back towards the mean. Predictions towards the extremes should be taken with caution.  
+All models display over predicting at lower masses and under predicting at higher masses compared to the 1:1 observed line, indicating an inability to adequately capture the body mass variance towards extremes. This reflects the heteroscedasticity mentioned earlier which can pull the predicted values at high body masses back towards the mean. Predictions towards the extremes should be taken with caution.  
 
 ### 6.2 `ANOVA` model comparisons
 As there are currently three working models which have all passed `DHARMa` residual and `check_model()` checks and appear to predict very similar body masses, their fits can be directly quanitified against each other using `anova()` with `AIC` and `BIC` acting as comparative scores. 
@@ -442,9 +435,8 @@ Another summary of `glmm_gauss2`:
 summary(glmm_gauss_log)
 ```
 
-
 ### 7.1 Model simplifying
-From the summary above only `distance_to_water_km` is a significant predictor in giraffe body mass in this model, and there are two non-significant predictors: `predator_density_per_sq_km` ($p = 0.956$) and `lion_presencePresent` ($p = 0.452$). Also, the coefficient for average rainfall is so small ($\approx$ 5.7e-5) it's negligible in this model and will be removed. 
+From the summary above only `distance_to_water_km` is a significant predictor in giraffe body mass in this model ($p = 0.279$), and there are two highly non-significant predictors: `predator_density_per_sq_km` ($p = 0.956$) and `lion_presencePresent` ($p = 0.452$). Also, the coefficient for average rainfall is so small ($\approx$ 5.7e-5) it's negligible in this model and will be removed. 
 
 A model will be made without these three predictors to test if reducing complexity still produces a valid model:
 
@@ -481,7 +473,23 @@ plot(glmm_gauss2_log_res)
 check_model(glmm_gauss2_log)
 ```
 
-Still passes residual testing and other diagnostics. As such the `glmm_gauss2_log` model will be taking forward as the final model.
+Still passes residual testing and other diagnostics, and still displaying slight heteroscedasticity in residuals, although this is not a significant violation of model assumptions.
+
+### 7.2 Testing interactions
+Interactions with vegetation/landscape will be assessed to see if the effect of distance to water varies among habitat types, and to see if model fit improves by their inclusion:
+
+```{r}
+# distance to water to vegetation:
+glmm_gauss3_log <- update(glmm_gauss2_log, . ~ . + distance_to_water_km:vegetation)
+
+#distance to water to landscape:
+glmm_gauss4_log <- update(glmm_gauss2_log, . ~ . + distance_to_water_km:landscape)
+
+# test against current model
+anova(glmm_gauss2_log, glmm_gauss3_log, glmm_gauss4_log)
+```
+
+Adding these interactions did not significantly improve model fit ($p = 0.339$ and $1.00$), and the slightly reduced deviance in `glmm_gauss3_log` does not justify the increased complexity and AIC/BIC scores. As such the more parsimonious `glmm_gauss2_log` model will be taking forward as the final model.
 
 ## 8. Model fit and interpretation
 This model predictions can be plotted against the observed values to visualise how well it fits the observed data:
@@ -491,7 +499,7 @@ This model predictions can be plotted against the observed values to visualise h
 fit_model_gauss2_log <- data.frame(
   
   # back transform from log to get predicted on the correct scale:
-  "Predicted" = exp(predict(glmm_gauss2_log, type = "response")),
+  "Predicted" = exp(predict(glmm_gauss2_log)),
   "Observed" = df_clean$body_mass
   
 )
@@ -525,8 +533,24 @@ ggplot(fit_model_gauss2_log) +
 
 ```
 
-Points represent the predicted mass value from the `glmm_gauss2_log` model based on the predictor values from the true observations in the data. The fitted loess line shows that the model tends to over predicts lower body masses, and under predict higher body masses compared to the observed values which could be due to missing predictors in the data as mentioned above, however overall residuals and model checks indicate a good fit. As the main aim is to test any significant predictors on body mass, this model is appropriate.
+Points represent the predicted mass value from the `glmm_gauss2_log` model based on the predictor values from the true observations in the data, with a 1:1 observed line for reference to observed values. The fitted loess line shows that the model tends to over predicts lower body masses, and under predict higher body masses compared to the observed values which could be due to missing predictors in the data as mentioned above, however overall residuals and model checks indicate a good fit. As the main aim is to test any significant predictors on body mass, this model is appropriate.
 
+#### Mean absolute error (MAE)
+MAE shows the average average difference in observed vs. predicted body mass from the model, and is used to see how far the model predictions differ from the observed on average:
+
+```{r}
+# using fit_model_gauss2_log to calculate MAE using absolute residuals:
+mae_glmm_gauss2_log <- mean(abs(fit_model_gauss2_log$Observed - fit_model_gauss2_log$Predicted))
+mae_glmm_gauss2_log
+
+# and as a percentage of the observed mean:
+(mae_glmm_gauss2_log/mean(df_clean$body_mass))*100
+
+```
+
+From this, the model predicts giraffe body mass with an MAE of 194.3kg (15.7% of mean mass) observed body mass, indicating reasonable, but not high, prediction accuracy.
+
+#### Variance in model and residual error
 Variance in the observed response (log(body mass)) captured by the model vs. residual error can be quantified using `r2_nakagawa()` from `performance`:
 
 ```{r}
@@ -592,6 +616,7 @@ So the model predicts a small marginal effect: giraffe mass increases by $\appro
 
 
 ## 10. Interpreting model fixed effects
+The fixed effects in `glmm_gauss2_log` can be plotted in terms of their effects on giraffe body mass with confidence intervals (CI) at 95%:
 
 ```{r}
 # data frame with fixed effect and confidence intervals:
@@ -602,19 +627,9 @@ model_fixed_effects_tidy <- broom.mixed::tidy(glmm_gauss2_log, conf.int = TRUE, 
   
   # remove intercept value
   filter(term!="(Intercept)")
-  
-
-
-# back transform estimates and confidences:
-model_fixed_effects_tidy <- model_fixed_effects_tidy %>%
-  
-  # back transform
-  mutate(
-    estimate_bt = exp(estimate),
-    conf.low_bt = exp(conf.low),
-    conf.high_bt = exp(conf.high)
-  )
 ```
+
+Plotting these data:
 
 ```{r}
 # plot fixed effect coefficients
@@ -623,21 +638,21 @@ ggplot(model_fixed_effects_tidy, aes(x=estimate, y=term)) +
   # add fixed effect coefficient
   geom_point(shape = 21, fill = wes_palette("FantasticFox1")[2], size = 5)+
   
-  # and 95% CIs
-  geom_errorbar(aes(xmin=conf.low, xmax=conf.high),                       
-              width=0.3, 
-              col="grey50") +
+  # 95% CI error bars
+  geom_errorbar(aes(xmin=conf.low, xmax=conf.high), width = 0.25, col="grey50") +
   
   # red dashed line at x = 0
   geom_vline(xintercept =0, linetype = "dashed", col = "red") +
   
   # aesthetics
-  xlab("Coefficient estimate") +
+  xlab("Coefficient estimate on log(body mass) scale") +
   ylab("Fixed effect") +
   ggtitle("Estimated Model Fixed Effect Coefficients at 95% CI") +
   theme_lucid() 
 
 ```
+
+These plotted coefficient estimates with 95% CI show the estimates impact on log(body mass) of each fixed effect in the model. The red line at x =  0 indicates $\beta = 0$ so no effect on log(body mass), (ie. a multiplicative effect of $e^{0} = 1$ on body mass). Distance to water displays non-overlap with this line which displays its significance at 
 
 Visual of the statistically significant predictor against body mass:
 
@@ -660,7 +675,7 @@ plot(df_predict) +
 
 ```
 
-The points above are the observed data overlaid on the model's prediction for body mass against distance to water. This plot is an exponential on this normal scale with $\text{Body Mass} \propto 1.012^{\text{Distance to Water}}$ but approximates a linear plot over this range as the coefficient is so small (1.2% increase per unit distance).
+The points above are the observed data overlaid on the model's prediction for body mass against distance to water. This plot is exponential on this normal scale with $\text{Body Mass} \propto 1.012^{\text{Distance to Water}}$ but approximates linear over this range as the coefficient is small (1.2% increase per unit distance).
 
 ## 11. Interpreting model random effects
 From the above equation for `glmm_gauss2_log` (equation 1), there are random effects termed $b_{park[i]}$ and $b_{observer[i]}$. These are estimated multiplicative factors $e^{b_{park[i]}}$ and $e^{b_{observer[i]}}$ (on the original scale) from the expected population level body mass, and they represent deviations in body mass purely due to the level of the random effect, assuming fixed effects are constant.
@@ -706,8 +721,8 @@ ggplot(ranefs_park, aes(x = bt, y = park)) +
   
   geom_point(col = "#F89C74", size = 5) + 
   
-  # add effect horizontal error bars
-  geom_errorbarh(aes(xmin = bt_lower, xmax = bt_upper), height = 0.25, col = "grey50") +
+  # 95%CI error bars:
+  geom_errorbar(aes(xmin = bt_lower, xmax = bt_upper), width = 0.25, col = "grey50") +
   
   # add vertical line for mean/expected across all parks
   geom_vline(xintercept = 1, col ="red3", linetype = "dashed") +
@@ -719,7 +734,7 @@ ggplot(ranefs_park, aes(x = bt, y = park)) +
   theme_lucid()
 ```
 
-Error bars here represent a 95% confidence interval (CI) after back transforming, and the red dashed line represents the population level expectation on the multiplicative scale after accounting for the fixed effects (x = 1 represents no effect on the multiplicative scale for body mass).
+Error bars here represent a 95% CI after back transforming, and the red dashed line represents the population level expectation on the multiplicative scale after accounting for the fixed effects (x = 1 represents no effect on the multiplicative scale for body mass).
 
 Park multiplicative factors, at 95% CI, range from ~0.88 to ~1.20, and indicate that some parks have a higher/lower baseline body mass. Confidence intervals indicate Zebra Horizon Park masses are ~10% higher than the expected population value (factor 1.10 [CI: 1.02 - 1.20]).
 
@@ -751,7 +766,6 @@ ranefs_observer <- ranefs$cond$observer %>%
   )
 
 
-
 head(ranefs_observer)
 ```
 
@@ -762,8 +776,8 @@ ggplot(ranefs_observer, aes(x = bt, y = observer)) +
   
   geom_point(col = "#154360", size = 5) + 
   
-  # add effect horizontal error bars
-  geom_errorbarh(aes(xmin = bt_lower, xmax = bt_upper), height = 0.25, col = "grey50") +
+  # 95%CI error bars:
+  geom_errorbar(aes(xmin = bt_lower, xmax = bt_upper), width = 0.25, col = "grey50") +
   
   # add vertical line for mean/expected across all observers
   geom_vline(xintercept = 1, col ="red3", linetype = "dashed") +
@@ -792,13 +806,15 @@ As with parks, including observer as a random effect improves model fit signific
 
 
 ## 12. Conclusion
-Distance to water was a significant factor on giraffe body mass with a 1.2% increase in body mass for every km further from water a giraffe is observed in this model ($p = 0.025$), thus $H_0$ may be rejected at the 5% significance level. Increased body mass further from a water source may be a result of reduced foraging competition away from busy water sites, or of unrelated seasonal changes in body mass paired with different seasonal distributions of water sites. Without temporal data included here it is hard to disentangle.
+Distance to water was a significant factor on giraffe body mass with a 1.2% increase in body mass for every km further from water a giraffe is observed in this model ($p = 0.025$), thus $H_0$ may be rejected at the 5% significance level.  
 
-Additional meaningful variations in body mass factors were observed in the park and observer random effects. Zebra Horizon Park masses were recorded ~10% higher than the expected population value; masses from observer 1 were ~10% higher, and observer 2 ~9% lower, than the expected population value. While these random effects are not statistically significant in terms of $p$ value, they indicate a contribution to baseline body mass variation in the population from different random effect levels. The variance in the response explained by these random effects also far outweighed those from the fixed effects (19.5% vs. 2.7%), which could indicates potential biases or differences in the methods used to measure body mass between observers, as well as demonstrating the limited power of the fixed effects in explaining body mass in this model.
+Increased body mass further from a water source may be a result of reduced foraging competition away from busy water sites, or of unrelated seasonal changes in body mass paired with different seasonal distributions of water sites. Without temporal data included here it is hard to disentangle. Furthermore, giraffe biology and behaviour also need to be taken into account, given a typical roaming distance of 10km and 1200kg mass, this would translate to a $1200 \times (1.012)^{10} - 1200 \approx 152$kg difference, or a 12.7% increase in body mass over this distance. Such a large increase seems implausible biologically and likely reflects a lack of other included predictors rather than a direct relationship between water distance and body mass. 
 
-As such a large amount of the model's variance was unexplained (77.9%), it means that the majority of the prediction power comes from unexplained variance, and the current predictors have a relatively weak predictive power. This could be due to missing other important predictors in the data such as: temporal data, temperatures, population counts, elevation data, type of habitat, and vegetation density and quality. If these predictor data were included, as well changes from binary to more detailed descriptions for `landscape` and `vegetation`, they could reduce residual variance, and effectively move these predictor effects out of the unexplained variance $\epsilon_i$, and into the fixed effects. Increasing the predictive abilities of the model, and in turn the precision of the model, would not necessarily uncover any other significant predictors but it could shift their coefficients, standard errors, and $p$ values due to new interactions. In turn this could help reveal significant predictors which are currently stored as "noise" within the unexplained variance, or even identify those currently in the fixed effects of the model as significant. 
+Additional meaningful variations in body mass factors were observed in the park and observer random effects. Zebra Horizon Park masses were recorded ~10% higher than the expected population value; masses from observer 1 were ~10% higher, and observer 2 ~9% lower, than the expected population value. While these random effects are not statistically significant in terms of $p$ value, they provide a large contribution to baseline body mass variation in the population from different random effect levels. The variance in the response explained by these random effects also far outweighed those from the fixed effects (19.5% vs. 2.7%), which could indicates potential biases, low quality data, or differences in the methods used to measure body mass between observers as well as demonstrating the limited power of the fixed effects in explaining body mass in this model.
 
-Overall, distance to water has a small but significant effect on giraffe body mass, but most of the observed variation remains unexplained or associated with potential biases in random effects.
+Given the high unexplained variance (77.9%), the majority of the model's prediction power comes from this variance, and the current predictors have a relatively weak predictive power. This could be due to missing other important predictors in the data such as: temporal data (time since last drink, time of day, and season), temperatures, population counts, elevation data, type of habitat, and vegetation density and quality. If these predictor data were included, as well changes from binary to more detailed descriptions for `landscape` and `vegetation`, they could reduce residual variance, and effectively move these predictor effects out of the unexplained variance $\epsilon_i$, and into the fixed effects. Increasing the predictive abilities of the model would not necessarily uncover any other significant predictors but it could shift their coefficients, standard errors, and $p$ values due to new interactions which could help reveal significant predictors which are currently stored as "noise" within the unexplained variance.
+
+Overall, distance to water has a small but significant effect on giraffe body mass in this model, but most of the observed variation remains unexplained or associated with potential biases in random effects.
 
 
 
