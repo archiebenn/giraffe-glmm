@@ -10,6 +10,9 @@ renv/library/
 # HTMLs
 *.html
 
+# TeX
+*.tex
+
 # any extra files
 *.log
 exam.*
