@@ -43,7 +43,7 @@ library(ggeffects)
 Load in the data (tsv file saved from GitHub) as a tibble:
 
 ```{r, message=FALSE}
-df <- read_tsv("../data/mass_sj19031.tsv")
+df <- read_tsv("data/mass_sj19031.tsv")
 ```
 
 Describe to get an overview of the data:
