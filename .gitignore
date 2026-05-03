@@ -12,3 +12,5 @@ renv/library/
 
 # any extra files
 *.log
+exam.*
+extra.*
