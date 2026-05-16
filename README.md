@@ -20,7 +20,7 @@ body mass per km further from water.
 ## Methods
 
 - Data cleaning: outlier removal, long to wide pivot, and typo corrections
-- Distribution assessment: Box-Cox, fitdistr, histogram
+- Distribution assessment: Box-Cox, fitdistr, histograms
 - Model families tested: Gaussian (log & cube-root), Gamma
 - Model selection: AIC/BIC from ANOVA comparison
 - Diagnostics: DHARMa residuals, VIF collinearity, check_model()
@@ -32,14 +32,6 @@ body mass per km further from water.
 ## Key packages
 
 `glmmTMB`, `DHARMa`, `performance`, `tidyverse`, `MASS`, `caret`
-
----
-
-## Structure
-
-BIOLM0039_exam.Rmd   # full analysis in R markdown doc
-data/
-  mass_sj19031.tsv   # giraffe observation data (about 8700 observations)
 
 ---
 
