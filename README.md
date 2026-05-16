@@ -1,19 +1,14 @@
 # Investigating Giraffe Body Mass using R
 **MSc Bioinformatics | BIOLM0039 (Programming in R) | Final mark: 78**
 
-Mixed-effects modelling of giraffe body mass using GLMM in R, 
-identifying environmental and observational predictors across 
-4 wildlife parks.
+Mixed-effects modelling of giraffe body mass using GLMMs in R, identifying environmental and observational predictors across 4 wildlife parks.
 
 ## Overview
-This project fits and compares generalised linear mixed models 
-(GLMMs) to assess which factors significantly predict giraffe 
-body mass, accounting for observer and park-level clustering 
-as crossed random effects.
+This coursework project involved fitting and comparing GLMMs to assess which factors significantly predict giraffe 
+body mass, accounting for observer and park-level clustering as crossed random effects.
 
 **Key finding:** Distance to water was the only significant 
-fixed-effect predictor (p = 0.025), with a ~1.2% increase in 
-body mass per km further from water.
+fixed-effect predictor (p = 0.025), with a ~1.2% increase in body mass per km further from water.
 
 ---
 
@@ -45,9 +40,7 @@ body mass per km further from water.
 
 Conditional $R^2$ = 0.221 | Marginal $R^2$ = 0.027
 
-Random effects explained ~19.5% of variance vs ~2.7% 
-from fixed effects, suggesting park/observer biases 
-outweigh environmental predictors in this dataset.
+Random effects explained ~19.5% of variance vs ~2.7% from fixed effects, suggesting park/observer biases outweigh environmental predictors in this dataset.
 
 ---
 
