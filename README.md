@@ -39,5 +39,5 @@ Conditional $R^2$ = 0.221 | Marginal $R^2$ = 0.027
 Random effects explained ~19.5% of variance vs ~2.7% from fixed effects, suggesting park/observer biases outweigh environmental predictors in this dataset.
 
 ## Usage
-Open `BIOLM0039_exam.Rmd` in RStudio and knit to HTML.
+Open `scripts/BIOLM0039_exam.Rmd` in RStudio and knit to HTML.
 All required packages are listed in the setup chunk.
