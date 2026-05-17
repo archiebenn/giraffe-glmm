@@ -10,8 +10,6 @@ body mass, accounting for observer and park-level clustering as crossed random e
 **Key finding:** Distance to water was the only significant 
 fixed-effect predictor (p = 0.025), with a ~1.2% increase in body mass per km further from water.
 
----
-
 ## Methods
 
 - Data cleaning: outlier removal, long to wide pivot, and typo corrections
@@ -20,15 +18,13 @@ fixed-effect predictor (p = 0.025), with a ~1.2% increase in body mass per km fu
 - Model selection: AIC/BIC from ANOVA comparison
 - Diagnostics: DHARMa residuals, VIF collinearity, check_model()
 - Random effects: crossed park + observer intercepts
-- Visualisation: ggplot2
+- Visualisations: `ggplot2`
 
----
 
 ## Key packages
 
 `glmmTMB`, `DHARMa`, `performance`, `tidyverse`, `MASS`, `caret`
 
----
 
 ## Results summary
 
@@ -41,8 +37,6 @@ fixed-effect predictor (p = 0.025), with a ~1.2% increase in body mass per km fu
 Conditional $R^2$ = 0.221 | Marginal $R^2$ = 0.027
 
 Random effects explained ~19.5% of variance vs ~2.7% from fixed effects, suggesting park/observer biases outweigh environmental predictors in this dataset.
-
----
 
 ## Usage
 Open `BIOLM0039_exam.Rmd` in RStudio and knit to HTML.
