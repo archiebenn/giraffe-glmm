@@ -1,5 +1,5 @@
 # Investigating Giraffe Body Mass using R
-**MSc Bioinformatics | BIOLM0039 (Programming in R) | Final mark: 78**
+**MSc Bioinformatics | BIOLM0039 (Programming in R)**
 
 Mixed-effects modelling of giraffe body mass using GLMMs in R, identifying environmental and observational predictors across 4 wildlife parks.
 
